@@ -1,0 +1,26 @@
+From: <Saved by Test>
+MIME-Version: 1.0
+Content-Type: multipart/related; boundary="BOUND-A"
+
+--BOUND-A
+Content-Type: multipart/alternative; boundary="INNER-A"
+
+--INNER-A
+Content-Type: text/plain
+Content-Location: http://example.com/a
+
+Alpha
+--INNER-A
+Content-Type: text/html
+Content-Transfer-Encoding: base64
+Content-Location: http://example.com/a
+
+PCFET0NUWVBFIGh0bWw+PGh0bWw+PGhlYWQ+PHRpdGxlPkE8L3RpdGxlPjwvaGVhZD48Ym9keT48cD5BbHBoYSDnlLI8L3A+PGltZyBzcmM9Imh0dHA6Ly9leGFtcGxlLmNvbS9pbWcvYS5wbmciPjwvYm9keT48L2h0bWw+
+--INNER-A--
+--BOUND-A
+Content-Type: image/png
+Content-Transfer-Encoding: base64
+Content-Location: http://example.com/img/a.png
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==
+--BOUND-A--

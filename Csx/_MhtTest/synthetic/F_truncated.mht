@@ -1,0 +1,14 @@
+MIME-Version: 1.0
+Content-Type: multipart/related; boundary="BOUND-F"
+
+--BOUND-F
+Content-Type: text/html
+Content-Location: http://example.com/f
+
+<html><body>truncated</body></html>
+--BOUND-F
+Content-Type: image/png
+Content-Transfer-Encoding: base64
+Content-Location: http://example.com/img/a.png
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==

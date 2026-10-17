@@ -1,0 +1,12 @@
+MIME-Version: 1.0
+Content-Type: multipart/related; boundary="BOUND-B"
+
+--BOUND-B
+Content-Type: text/html; charset="gb2312"
+Content-Transfer-Encoding: quoted-printable
+Content-Location: http://example.com/b
+
+<!DOCTYPE html><html><head><meta charset=3D"gb2312"><title>=D2=D2</title></=
+head><body><p>=D6=D0=CE=C4=9Cy=D4=87=A3=BA=BC=D7=D2=D2=B1=FB=B6=A1</p></bod=
+y></html>
+--BOUND-B--

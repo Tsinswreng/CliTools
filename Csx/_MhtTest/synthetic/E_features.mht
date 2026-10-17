@@ -1,0 +1,48 @@
+MIME-Version: 1.0
+Content-Type: multipart/related; type="text/html"; boundary="BOUND-E"
+
+--BOUND-E
+Content-Type: text/html
+Content-Transfer-Encoding: quoted-printable
+Content-Location: http://example.com/e
+
+<!DOCTYPE html><html><head><title>E</title><link rel=3D"stylesheet" href=3D=
+"http://example.com/main.css"><link rel=3D"preconnect" href=3D"https://cdn.=
+example.com"></head><body><img src=3D"http://example.com/img/a.png" srcset=
+=3D"http://example.com/img/a.png 1x, http://example.com/img/b.png 2x"><img =
+data-src=3D"http://example.com/img/b.png"><div style=3D"background-image:ur=
+l(http://example.com/img/a.png)">x</div></body></html>
+--BOUND-E
+Content-Type: text/css
+Content-Transfer-Encoding: quoted-printable
+Content-Location: http://example.com/main.css
+
+@charset "utf-8";
+@import url("http://example.com/imported.css");
+.a{background:url(http://example.com/img/a.png)}
+.b{background:url(https\:\/\/example\.com\/img\/escaped\.png)}
+
+--BOUND-E
+Content-Type: text/css
+Content-Location: http://example.com/imported.css
+
+.imported{background:url('http://example.com/img/a.png')}
+
+--BOUND-E
+Content-Transfer-Encoding: base64
+Content-Location: http://example.com/img/a.png
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==
+--BOUND-E
+Content-Type: image/png
+Content-Transfer-Encoding: base64
+Content-Location: http://example.com/img/b.png
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==
+--BOUND-E
+Content-Type: image/png
+Content-Transfer-Encoding: base64
+Content-Location: http://example.com/img/escaped.png
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==
+--BOUND-E--

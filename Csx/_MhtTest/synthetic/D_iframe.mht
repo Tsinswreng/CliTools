@@ -1,0 +1,24 @@
+MIME-Version: 1.0
+Content-Type: multipart/related; type="text/html"; boundary="BOUND-D"
+
+--BOUND-D
+Content-Type: text/html
+Content-Transfer-Encoding: quoted-printable
+Content-Location: http://example.com/d
+
+<!DOCTYPE html><html><head><title>D</title></head><body><iframe src=3D"http=
+://example.com/frame.html" width=3D"300"></iframe></body></html>
+--BOUND-D
+Content-Type: text/html
+Content-Transfer-Encoding: quoted-printable
+Content-Location: http://example.com/frame.html
+
+<!DOCTYPE html><html><head><title>F</title></head><body><img src=3D"http://=
+example.com/img/f.png"></body></html>
+--BOUND-D
+Content-Type: image/png
+Content-Transfer-Encoding: base64
+Content-Location: http://example.com/img/f.png
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==
+--BOUND-D--
