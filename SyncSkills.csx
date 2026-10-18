@@ -1,3 +1,4 @@
+//version="2026_1018_104443"
 #r "nuget: Tsinswreng.CsSh, 0.3.0-alpha"
 #nullable enable
 using System.Linq;

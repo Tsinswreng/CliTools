@@ -43,6 +43,10 @@ if(Options.ShowHelp){
 	Cli.PrintUsage();
 	return;
 }
+if(!string.IsNullOrEmpty(Options.TreeRoot)){
+	Environment.ExitCode = Cli.RunTree(Options);
+	return;
+}
 if(Options.Inputs.Count == 0){
 	Cli.PrintUsage();
 	Environment.ExitCode = 1;
@@ -65,6 +69,8 @@ sealed class Opts {
 	public readonly List<string> Inputs = new();
 	public string? OutFile;
 	public string? OutDir;
+	public string? TreeRoot;
+	public bool Force;
 	public bool StripScripts;
 	public bool Inspect;
 	public bool Quiet;
@@ -91,6 +97,14 @@ static class Cli {
 					if(I + 1 >= Args.Count){ throw new ArgumentException("--out-dir 需要一個目錄"); }
 					O.OutDir = Args[++I];
 					continue;
+				case "--tree":
+					if(I + 1 >= Args.Count){ throw new ArgumentException("--tree 需要一個來源目錄"); }
+					O.TreeRoot = Args[++I];
+					continue;
+				case "-f":
+				case "--force":
+					O.Force = true;
+					continue;
 				case "--strip-scripts":
 					O.StripScripts = true;
 					continue;
@@ -115,10 +129,13 @@ static class Cli {
 		Echo("");
 		Echo("用法:");
 		Echo("  dotnet script Mht2Html.csx -- <輸入.mht> [更多輸入...] [選項]");
+		Echo("  dotnet script Mht2Html.csx -- --tree <來源目錄> --out-dir <輸出目錄> [-f]");
 		Echo("");
 		Echo("選項:");
 		Echo("  -o, --out <檔案>       指定輸出檔名（僅限單一輸入）");
 		Echo("  --out-dir <目錄>       指定輸出目錄（檔名沿用輸入檔名，副檔名改 .html）");
+		Echo("  --tree <目錄>          遞歸轉換整棵目錄，輸出樹與來源同構");
+		Echo("  -f, --force            覆寫已存在的輸出（預設跳過，可重複執行續跑）");
 		Echo("  --strip-scripts        移除所有 script 元素");
 		Echo("  --inspect              只列出 MIME 結構，不轉換");
 		Echo("  -q, --quiet            只輸出錯誤");
@@ -136,74 +153,182 @@ static class Cli {
 			Console.Error.WriteLine("[error] 無法解析路徑 " + InArg + ": " + Ex.Message);
 			return false;
 		}
-		if(!File.Exists(InPath)){
+		if(!File.Exists(LongPath(InPath))){
 			Console.Error.WriteLine("[error] 檔案不存在: " + InPath);
-			return false;
-		}
-
-		byte[] Raw;
-		try {
-			Raw = File.ReadAllBytes(InPath);
-		} catch(Exception Ex) {
-			Console.Error.WriteLine("[error] 讀取失敗 " + InPath + ": " + Ex.Message);
 			return false;
 		}
 
 		if(O.Inspect){
 			try {
-				MhtConverter.Inspect(Raw, InPath);
+				MhtConverter.Inspect(File.ReadAllBytes(LongPath(InPath)), InPath);
 				return true;
 			} catch(Exception Ex) {
 				Console.Error.WriteLine("[error] 解析失敗 " + InPath + ": " + Ex.Message);
 				return false;
 			}
 		}
+		return ConvertFile(InPath, ResolveOutPath(InPath, O), O.StripScripts, O.Quiet, ShowDetail: true);
+	}
+
+	/// 遞歸轉換整棵目錄：輸出樹與來源樹同構，副檔名一律改成 .html。
+	/// 已存在的輸出預設跳過，因此中斷後直接重跑即可續傳；要覆寫得加 --force。
+	public static int RunTree(Opts O){
+		var InRoot = FullPath(O.TreeRoot!).Value.TrimEnd('/', '\\');
+		if(!Directory.Exists(LongPath(InRoot))){
+			Console.Error.WriteLine("[error] 來源目錄不存在: " + InRoot);
+			return 1;
+		}
+		var OutRoot = string.IsNullOrEmpty(O.OutDir)
+			? InRoot + "_html"
+			: FullPath(O.OutDir).Value.TrimEnd('/', '\\');
+		if(string.Equals(InRoot, OutRoot, StringComparison.OrdinalIgnoreCase)){
+			Console.Error.WriteLine("[error] 來源與輸出是同一個目錄，拒絕執行");
+			return 1;
+		}
+		Directory.CreateDirectory(LongPath(OutRoot));
+
+		var EnumOpts = new EnumerationOptions {
+			RecurseSubdirectories = true,
+			IgnoreInaccessible = true,
+			AttributesToSkip = FileAttributes.ReparsePoint,
+			MatchCasing = MatchCasing.CaseInsensitive,
+		};
+		var Files = new List<string>();
+		foreach(var F in Directory.EnumerateFiles(LongPath(InRoot), "*", EnumOpts)){
+			var Ext = Path.GetExtension(F);
+			if(Ext.Equals(".mht", StringComparison.OrdinalIgnoreCase) || Ext.Equals(".mhtml", StringComparison.OrdinalIgnoreCase)){
+				Files.Add(F);
+			}
+		}
+		Files.Sort(StringComparer.OrdinalIgnoreCase);
+
+		var Total = Files.Count;
+		Echo("[tree] 來源 " + InRoot);
+		Echo("[tree] 輸出 " + OutRoot);
+		Echo($"[tree] 待處理 {Total} 個 mht（既有輸出{(O.Force ? "將被覆寫" : "會跳過")}）");
+
+		var Ok = 0;
+		var Skip = 0;
+		var Fail = 0;
+		var Done = 0;
+		var LastReport = 0;
+		var Sw = System.Diagnostics.Stopwatch.StartNew();
+		foreach(var F in Files){
+			Done++;
+			string Rel;
+			try {
+				Rel = Path.GetRelativePath(StripLongPrefix(InRoot), StripLongPrefix(F));
+			} catch(Exception Ex) {
+				Console.Error.WriteLine("[error] 無法計算相對路徑 " + F + ": " + Ex.Message);
+				Fail++;
+				continue;
+			}
+			var OutPath = Path.Combine(OutRoot, Path.ChangeExtension(Rel, ".html"));
+			if(!O.Force && File.Exists(LongPath(OutPath))){
+				Skip++;
+			} else if(ConvertFile(StripLongPrefix(F), OutPath, O.StripScripts, Quiet: true, ShowDetail: false)){
+				Ok++;
+			} else {
+				Fail++;
+			}
+			if(Done - LastReport >= 50 || Done == Total){
+				LastReport = Done;
+				var PerSec = Done / Math.Max(0.001, Sw.Elapsed.TotalSeconds);
+				var EtaMin = (Total - Done) / Math.Max(0.001, PerSec) / 60.0;
+				Echo($"[progress] {Done}/{Total}  成功 {Ok}  跳過 {Skip}  失敗 {Fail}  "
+					+ $"已用 {Sw.Elapsed.TotalMinutes:0.0} 分  剩約 {EtaMin:0.0} 分");
+				if(Done % 300 == 0){ GC.Collect(); }
+			}
+		}
+		Sw.Stop();
+		Echo($"[done] 共 {Total} 個：成功 {Ok}，跳過 {Skip}，失敗 {Fail}，耗時 {Sw.Elapsed.TotalMinutes:0.0} 分");
+		return Fail == 0 ? 0 : 1;
+	}
+
+	/// 單檔轉換：讀檔、轉換、寫檔。成功時回傳 true。
+	public static bool ConvertFile(string InPath, string OutPath, bool StripScripts, bool Quiet, bool ShowDetail){
+		byte[]? Raw;
+		try {
+			Raw = File.ReadAllBytes(LongPath(InPath));
+		} catch(Exception Ex) {
+			Console.Error.WriteLine("[error] 讀取失敗 " + InPath + ": " + Ex.Message);
+			return false;
+		}
 
 		MhtConvertResult R;
 		try {
-			R = MhtConverter.Convert(Raw, O.StripScripts);
+			R = MhtConverter.Convert(Raw, StripScripts);
 		} catch(MhtFormatException Ex){
 			Console.Error.WriteLine("[error] " + Ex.Message + "  (" + InPath + ")");
 			return false;
 		} catch(Exception Ex){
 			Console.Error.WriteLine("[error] 轉換失敗 " + InPath + ": " + Ex.GetType().Name + ": " + Ex.Message);
 			return false;
+		} finally {
+			// 大檔的原始位元組不要在轉換後還被抓住
+			Raw = null;
 		}
 
-		var OutPath = ResolveOutPath(InPath, O);
 		try {
 			var Dir = Path.GetDirectoryName(OutPath);
-			if(!string.IsNullOrEmpty(Dir)){ Directory.CreateDirectory(Dir); }
-			File.WriteAllBytes(OutPath, new UTF8Encoding(false).GetBytes(R.Html));
+			if(!string.IsNullOrEmpty(Dir)){ Directory.CreateDirectory(LongPath(Dir)); }
+			WriteUtf8(OutPath, R.Html);
 		} catch(Exception Ex) {
 			Console.Error.WriteLine("[error] 寫入失敗 " + OutPath + ": " + Ex.Message);
 			return false;
 		}
 
+		if(Quiet){ return true; }
+
 		var UniqueWarn = R.Warnings.Distinct().ToList();
-		if(!O.Quiet){
-			foreach(var W in UniqueWarn.Take(5)){
-				Console.Error.WriteLine("[warn] " + Path.GetFileName(InPath) + ": " + W);
-			}
-			if(UniqueWarn.Count > 5){
-				Console.Error.WriteLine("[warn] …另有 " + (UniqueWarn.Count - 5) + " 類警告未列出");
-			}
-			var SizeBytes = new FileInfo(OutPath).Length;
-			var SizeText = SizeBytes < 10 * 1024
-				? SizeBytes + " B"
-				: (SizeBytes / 1024.0).ToString("0.0", CultureInfo.InvariantCulture) + " KB";
-			var Parts = R.Warnings.Count == 0 ? "" : "  警告 " + UniqueWarn.Count + " 類";
-			Echo($"[ok] {Path.GetFileName(InPath)} -> {Path.GetFileName(OutPath)}  "
-				+ $"{SizeText}  資源 {R.ResourceCount} 個 (圖 {R.InlinedImages} 次 / CSS {R.InlinedCss} / 其他 {R.InlinedOther})  "
-				+ $"未解析引用 {R.Unresolved}" + Parts);
-			if(R.UnresolvedSamples.Count > 0){
-				Echo("     未解析引用示例:");
-				foreach(var S in R.UnresolvedSamples.Distinct().Take(5)){
-					Echo("       " + S);
-				}
+		foreach(var W in UniqueWarn.Take(5)){
+			Console.Error.WriteLine("[warn] " + Path.GetFileName(InPath) + ": " + W);
+		}
+		if(UniqueWarn.Count > 5){
+			Console.Error.WriteLine("[warn] …另有 " + (UniqueWarn.Count - 5) + " 類警告未列出");
+		}
+		if(!ShowDetail){ return true; }
+
+		long SizeBytes = 0;
+		try { SizeBytes = new FileInfo(LongPath(OutPath)).Length; } catch { }
+		var SizeText = SizeBytes < 10 * 1024
+			? SizeBytes + " B"
+			: (SizeBytes / 1024.0).ToString("0.0", CultureInfo.InvariantCulture) + " KB";
+		var Parts = UniqueWarn.Count == 0 ? "" : "  警告 " + UniqueWarn.Count + " 類";
+		Echo($"[ok] {Path.GetFileName(InPath)} -> {Path.GetFileName(OutPath)}  "
+			+ $"{SizeText}  資源 {R.ResourceCount} 個 (圖 {R.InlinedImages} 次 / CSS {R.InlinedCss} / 其他 {R.InlinedOther})  "
+			+ $"未解析引用 {R.Unresolved}" + Parts);
+		if(R.UnresolvedSamples.Count > 0){
+			Echo("     未解析引用示例:");
+			foreach(var S in R.UnresolvedSamples.Distinct().Take(5)){
+				Echo("       " + S);
 			}
 		}
 		return true;
+	}
+
+	/// 分塊編碼寫出：幾百 MB 的輸出不必再配置一份同樣大的位元組陣列。
+	static void WriteUtf8(string OutPath, string Text){
+		using var Fs = new FileStream(LongPath(OutPath), FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20);
+		using var W = new StreamWriter(Fs, new UTF8Encoding(false), 1 << 16);
+		const int Chunk = 1 << 20;
+		for(var I = 0; I < Text.Length; I += Chunk){
+			W.Write(Text.AsSpan(I, Math.Min(Chunk, Text.Length - I)));
+		}
+	}
+
+	/// Windows 長路徑：路徑超過 240 字元時補上 \\?\ 前綴。
+	static string LongPath(string Path){
+		if(Path.Length < 240){ return Path; }
+		if(Path.StartsWith(@"\\?\")){ return Path; }
+		if(Path.StartsWith(@"\\")){ return @"\\?\UNC\" + Path.Substring(2); }
+		return @"\\?\" + Path;
+	}
+
+	static string StripLongPrefix(string Path){
+		if(Path.StartsWith(@"\\?\UNC\")){ return @"\\" + Path.Substring(8); }
+		if(Path.StartsWith(@"\\?\")){ return Path.Substring(4); }
+		return Path;
 	}
 
 	static string ResolveOutPath(string InPath, Opts O){
@@ -1483,7 +1608,12 @@ static class MhtConverter {
 
 	public static MhtConvertResult Convert(byte[] Raw, bool StripScripts){
 		var Root = MimeParser.Parse(Raw);
-		var RootHtml = FindRootHtml(Root) ?? throw new MhtFormatException("找不到 text/html 部分，這可能不是 MHTML 檔");
+		var RootHtml = FindRootHtml(Root);
+		if(RootHtml == null){
+			// 少數存檔是「對著圖片網址直接另存」，整包只有一個資源部分、沒有 html，
+			// 這種一樣交出一個 html，把那個資源包成頁面。
+			return ImageOnlyFallback(Root, Raw);
+		}
 		var AllHtml = new List<MimePart>();
 		CollectHtml(Root, AllHtml);
 
@@ -1543,6 +1673,47 @@ static class MhtConverter {
 	static void CollectHtml(MimePart P, List<MimePart> Out){
 		if(P.IsHtml){ Out.Add(P); }
 		foreach(var C in P.Children){ CollectHtml(C, Out); }
+	}
+
+	/// 沒有 text/html 部分時的兜底：整包只有一個資源（多半是直接另存的圖片），
+	/// 就把該資源包成一個只放它的 html，而不是整個檔案報失敗。
+	public static MhtConvertResult ImageOnlyFallback(MimePart Root, byte[] Raw){
+		var Candidates = new List<MimePart>();
+		WalkParts(Root, P => {
+			if(!P.IsMultipart && !P.IsHtml && P.BodyEnd > P.BodyStart){ Candidates.Add(P); }
+		});
+		if(Candidates.Count == 0){
+			throw new MhtFormatException("找不到 text/html 部分，這可能不是 MHTML 檔");
+		}
+		var P0 = Candidates[0];
+		var Bytes = P0.Decoded(Raw);
+		if(Bytes.Length == 0){
+			throw new MhtFormatException("找不到 text/html 部分，且唯一的資源是空的");
+		}
+		var Mt = NormalizeMediaType(P0, Bytes);
+		var Data = "data:" + Mt + ";base64," + System.Convert.ToBase64String(Bytes);
+		var Body = Mt.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
+			? "<img style=\"max-width:100%;height:auto\" src=\"" + Data + "\" alt=\"\">"
+			: "<object style=\"width:100%;height:100vh\" data=\"" + Data + "\"></object>";
+		var Html = "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\">"
+			+ "<title>" + HtmlEntity.EncodeAttr(SafeTitle(P0.ContentLocation)) + "</title></head>"
+			+ "<body style=\"margin:0;background:#111;text-align:center\">" + Body + "</body></html>\n";
+		var R = new MhtConvertResult {
+			Html = Html,
+			ResourceCount = Candidates.Count,
+			InlinedImages = Mt.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ? 1 : 0,
+			InlinedOther = Mt.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ? 0 : 1,
+		};
+		R.Warnings.Add("此檔沒有 text/html 部分，內容是 " + Mt + "，已把該資源包成頁面");
+		return R;
+	}
+
+	static string SafeTitle(string? Location){
+		if(string.IsNullOrWhiteSpace(Location)){ return ""; }
+		var S = Location.Trim();
+		var Slash = S.LastIndexOf('/');
+		if(Slash >= 0 && Slash + 1 < S.Length){ S = S.Substring(Slash + 1); }
+		return S.Length <= 120 ? S : S.Substring(0, 120);
 	}
 
 	static void WalkParts(MimePart P, Action<MimePart> Visit){
